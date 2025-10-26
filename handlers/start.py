@@ -15,4 +15,5 @@ async def start_command(client, message):
     else:
         await message.reply_text(USER_START_MESSAGE)
 
+# Export the filter
 start_handler = filters.command("start")
