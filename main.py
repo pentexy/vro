@@ -5,16 +5,28 @@ from database import Database
 from telethon_client import telethon_manager
 from strings.en import *
 import asyncio
-import os
+import re
 
 app = Client("account_bot", api_id=Config.API_ID, api_hash=Config.API_HASH, bot_token=Config.BOT_TOKEN)
 db = Database()
 
 # Store temporary data
 user_sessions = {}
+account_sessions = {}
 
 def is_owner(user_id):
     return user_id in [Config.OWNER_ID, Config.SECOND_OWNER_ID]
+
+def get_country_from_phone(phone):
+    if phone.startswith('+1'): return "US"
+    elif phone.startswith('+44'): return "GB"
+    elif phone.startswith('+91'): return "IN"
+    elif phone.startswith('+61'): return "AU"
+    elif phone.startswith('+49'): return "DE"
+    elif phone.startswith('+33'): return "FR"
+    elif phone.startswith('+7'): return "RU"
+    elif phone.startswith('+86'): return "CN"
+    else: return "OTHER"
 
 # Start command with 2x2 grid
 @app.on_message(filters.command("start"))
@@ -24,101 +36,134 @@ async def start_command(client, message):
     if is_owner(user_id):
         keyboard = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton(OWNER_PANEL_BUTTONS["add_account"], callback_data="add_account"),
-                InlineKeyboardButton(OWNER_PANEL_BUTTONS["available_accounts"], callback_data="available_accounts")
+                InlineKeyboardButton("➕ Add Account", callback_data="add_account"),
+                InlineKeyboardButton("📊 Available", callback_data="available_accounts")
             ],
             [
-                InlineKeyboardButton(OWNER_PANEL_BUTTONS["solded"], callback_data="solded"),
-                InlineKeyboardButton(OWNER_PANEL_BUTTONS["users"], callback_data="users")
+                InlineKeyboardButton("💰 Sold", callback_data="solded"),
+                InlineKeyboardButton("👥 Users", callback_data="users")
             ]
         ])
-        await message.reply_text(OWNER_PANEL_TITLE, reply_markup=keyboard)
+        await message.reply_text(
+            "🤖 <b>Owner Panel</b>\n\nWelcome back!",
+            reply_markup=keyboard
+        )
     else:
-        await message.reply_text(USER_START_MESSAGE)
+        await message.reply_text(
+            "👋 <b>Welcome!</b>\n\n"
+            "Get codes from @yourhinata\n"
+            "Use: <code>/get CODE</code>"
+        )
 
 # Main menu callback
 @app.on_callback_query(filters.regex("^main_menu$"))
 async def main_menu_callback(client, callback_query):
+    await callback_query.answer()
     user_id = callback_query.from_user.id
+    
     if is_owner(user_id):
         keyboard = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton(OWNER_PANEL_BUTTONS["add_account"], callback_data="add_account"),
-                InlineKeyboardButton(OWNER_PANEL_BUTTONS["available_accounts"], callback_data="available_accounts")
+                InlineKeyboardButton("➕ Add Account", callback_data="add_account"),
+                InlineKeyboardButton("📊 Available", callback_data="available_accounts")
             ],
             [
-                InlineKeyboardButton(OWNER_PANEL_BUTTONS["solded"], callback_data="solded"),
-                InlineKeyboardButton(OWNER_PANEL_BUTTONS["users"], callback_data="users")
+                InlineKeyboardButton("💰 Sold", callback_data="solded"),
+                InlineKeyboardButton("👥 Users", callback_data="users")
             ]
         ])
-        await callback_query.edit_message_text(OWNER_PANEL_TITLE, reply_markup=keyboard)
+        try:
+            await callback_query.edit_message_text(
+                "🤖 <b>Owner Panel</b>\n\nWelcome back!",
+                reply_markup=keyboard
+            )
+        except:
+            await callback_query.message.reply_text(
+                "🤖 <b>Owner Panel</b>\n\nWelcome back!",
+                reply_markup=keyboard
+            )
     else:
-        await callback_query.edit_message_text(USER_START_MESSAGE)
+        try:
+            await callback_query.edit_message_text(
+                "👋 <b>Welcome!</b>\n\n"
+                "Get codes from @yourhinata\n"
+                "Use: <code>/get CODE</code>"
+            )
+        except:
+            await callback_query.message.reply_text(
+                "👋 <b>Welcome!</b>\n\n"
+                "Get codes from @yourhinata\n"
+                "Use: <code>/get CODE</code>"
+            )
 
 # Add Account Flow
 @app.on_callback_query(filters.regex("^add_account$"))
 async def add_account_callback(client, callback_query):
+    await callback_query.answer()
     user_id = callback_query.from_user.id
     if not is_owner(user_id):
-        await callback_query.answer("Unauthorized!", show_alert=True)
+        await callback_query.answer("❌ Unauthorized!", show_alert=True)
         return
     
     user_sessions[user_id] = {"step": "awaiting_phone"}
     
-    await callback_query.edit_message_text(
-        ADD_ACCOUNT_START,
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(BUTTON_CANCEL, callback_data="main_menu")]])
-    )
+    try:
+        await callback_query.edit_message_text(
+            "🔐 <b>Add Account</b>\n\n"
+            "Send phone number with country code:\n"
+            "<code>+919876543210</code>",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="main_menu")]])
+        )
+    except:
+        await callback_query.message.reply_text(
+            "🔐 <b>Add Account</b>\n\n"
+            "Send phone number with country code:\n"
+            "<code>+919876543210</code>",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="main_menu")]])
+        )
 
-# Handle phone number input
+# Handle user messages
 @app.on_message(filters.private & filters.text & ~filters.command(["start", "get"]))
 async def handle_user_input(client, message):
     user_id = message.from_user.id
     
-    if user_id in user_sessions:
+    # Handle account adding flow
+    if user_id in user_sessions and is_owner(user_id):
         session = user_sessions[user_id]
         
         if session["step"] == "awaiting_phone":
-            # Validate phone number
             phone = message.text.strip()
-            if not phone.startswith('+') or len(phone) < 10:
-                await message.reply_text(INVALID_PHONE_FORMAT)
+            if not re.match(r'^\+\d{10,15}$', phone):
+                await message.reply_text("❌ Invalid phone format. Use: +919876543210")
                 return
             
             # Send code using Telethon
-            loading_msg = await message.reply_text("📱 <b>Sending verification code...</b>")
-            
+            loading_msg = await message.reply_text("📱 Sending code...")
             result = await telethon_manager.send_code_request(phone)
             
             if not result["success"]:
-                await loading_msg.delete()
-                await message.reply_text(f"❌ <b>Error:</b> {result['error']}")
+                await loading_msg.edit_text(f"❌ Error: {result['error']}")
                 return
             
             session.update({
                 "phone": phone,
                 "step": "awaiting_code",
                 "phone_code_hash": result["phone_code_hash"],
-                "client": result["client"],
-                "session_name": result["session_name"]
+                "client": result["client"]
             })
             
-            await loading_msg.delete()
-            await message.reply_text(
-                f"✅ <b>Code sent to {phone}</b>\n\n{ASK_PHONE_CODE}",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(BUTTON_CANCEL, callback_data="main_menu")]])
+            await loading_msg.edit_text(
+                f"✅ Code sent to {phone}\n\n"
+                "Enter the 5-digit code:"
             )
             
         elif session["step"] == "awaiting_code":
             code = message.text.strip()
-            
             if not code.isdigit() or len(code) != 5:
-                await message.reply_text(INVALID_CODE_FORMAT)
+                await message.reply_text("❌ Enter 5-digit code")
                 return
             
-            loading_msg = await message.reply_text("🔐 <b>Verifying code...</b>")
-            
-            # Sign in with code
+            loading_msg = await message.reply_text("🔐 Verifying...")
             result = await telethon_manager.sign_in(
                 session["client"],
                 session["phone"],
@@ -127,28 +172,13 @@ async def handle_user_input(client, message):
             )
             
             if result["success"]:
-                await loading_msg.delete()
-                session["step"] = "completed"
-                
                 # Get account info
                 account_info = await telethon_manager.get_me(session["client"])
-                
                 if account_info["success"]:
-                    # Determine country
-                    country = "OTHER"
-                    if session["phone"].startswith('+1'): country = "US"
-                    elif session["phone"].startswith('+44'): country = "GB"
-                    elif session["phone"].startswith('+91'): country = "IN"
-                    elif session["phone"].startswith('+61'): country = "AU"
-                    elif session["phone"].startswith('+49'): country = "DE"
-                    elif session["phone"].startswith('+33'): country = "FR"
-                    
+                    country = get_country_from_phone(session["phone"])
                     price = Config.PRICES.get(country, Config.PRICES["OTHER"])
-                    
-                    # Generate unique code
                     unique_code = db.generate_unique_code()
                     
-                    # Save account to database
                     account_data = {
                         "phone": session["phone"],
                         "country": country,
@@ -164,63 +194,41 @@ async def handle_user_input(client, message):
                     
                     db.add_account(account_data)
                     
-                    await message.reply_text(
-                        ACCOUNT_CODE_GENERATED.format(
-                            code=unique_code,
-                            country=country,
-                            phone=session["phone"],
-                            price=price
-                        ),
+                    await loading_msg.edit_text(
+                        f"✅ <b>Account Added!</b>\n\n"
+                        f"📝 <b>Code:</b> <code>{unique_code}</code>\n"
+                        f"🌍 <b>Country:</b> {country}\n"
+                        f"📞 <b>Phone:</b> {session['phone']}\n"
+                        f"💰 <b>Price:</b> ₹{price}\n\n"
+                        f"Users use: <code>/get {unique_code}</code>",
                         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]])
                     )
                 else:
-                    await message.reply_text(f"❌ <b>Error getting account info:</b> {account_info['error']}")
-                
-                # Cleanup
-                await telethon_manager.disconnect_client(session["client"])
-                del user_sessions[user_id]
-                
+                    await loading_msg.edit_text(f"❌ Error: {account_info['error']}")
             else:
-                await loading_msg.delete()
                 if "two-steps" in result["error"].lower():
                     session["step"] = "awaiting_2fa"
-                    await message.reply_text(
-                        ASK_2FA,
-                        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(BUTTON_CANCEL, callback_data="main_menu")]])
-                    )
+                    await loading_msg.edit_text("🔒 Enter 2FA password:")
                 else:
-                    await message.reply_text(f"❌ <b>Error:</b> {result['error']}")
-                    
+                    await loading_msg.edit_text(f"❌ Error: {result['error']}")
+            
+            # Cleanup
+            if session["step"] != "awaiting_2fa":
+                await telethon_manager.disconnect_client(session["client"])
+                del user_sessions[user_id]
+                
         elif session["step"] == "awaiting_2fa":
             password = message.text.strip()
-            
-            loading_msg = await message.reply_text("🔒 <b>Verifying 2FA...</b>")
+            loading_msg = await message.reply_text("🔒 Checking 2FA...")
             
             result = await telethon_manager.sign_in_with_2fa(session["client"], password)
-            
             if result["success"]:
-                await loading_msg.delete()
-                session["step"] = "completed"
-                
-                # Get account info
                 account_info = await telethon_manager.get_me(session["client"])
-                
                 if account_info["success"]:
-                    # Determine country
-                    country = "OTHER"
-                    if session["phone"].startswith('+1'): country = "US"
-                    elif session["phone"].startswith('+44'): country = "GB"
-                    elif session["phone"].startswith('+91'): country = "IN"
-                    elif session["phone"].startswith('+61'): country = "AU"
-                    elif session["phone"].startswith('+49'): country = "DE"
-                    elif session["phone"].startswith('+33'): country = "FR"
-                    
+                    country = get_country_from_phone(session["phone"])
                     price = Config.PRICES.get(country, Config.PRICES["OTHER"])
-                    
-                    # Generate unique code
                     unique_code = db.generate_unique_code()
                     
-                    # Save account to database
                     account_data = {
                         "phone": session["phone"],
                         "country": country,
@@ -236,31 +244,52 @@ async def handle_user_input(client, message):
                     
                     db.add_account(account_data)
                     
-                    await message.reply_text(
-                        ACCOUNT_CODE_GENERATED.format(
-                            code=unique_code,
-                            country=country,
-                            phone=session["phone"],
-                            price=price
-                        ),
+                    await loading_msg.edit_text(
+                        f"✅ <b>Account Added!</b>\n\n"
+                        f"📝 <b>Code:</b> <code>{unique_code}</code>\n"
+                        f"🌍 <b>Country:</b> {country}\n"
+                        f"📞 <b>Phone:</b> {session['phone']}\n"
+                        f"💰 <b>Price:</b> ₹{price}",
                         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]])
                     )
                 else:
-                    await message.reply_text(f"❌ <b>Error getting account info:</b> {account_info['error']}")
-                
-                # Cleanup
-                await telethon_manager.disconnect_client(session["client"])
-                del user_sessions[user_id]
+                    await loading_msg.edit_text(f"❌ Error: {account_info['error']}")
             else:
-                await loading_msg.delete()
-                await message.reply_text(f"❌ <b>2FA Error:</b> {result['error']}")
+                await loading_msg.edit_text(f"❌ 2FA Error: {result['error']}")
+            
+            await telethon_manager.disconnect_client(session["client"])
+            del user_sessions[user_id]
+    
+    # Handle price setting
+    elif user_id in user_sessions and "setting_price_for" in user_sessions[user_id]:
+        country = user_sessions[user_id]["setting_price_for"]
+        try:
+            price = int(message.text.strip())
+            if price <= 0:
+                await message.reply_text("❌ Price must be positive")
+                return
+            
+            # Update price in database
+            db.set_country_price(country, price)
+            
+            country_name = COUNTRY_NAMES.get(country, country)
+            await message.reply_text(
+                f"✅ <b>Price Updated!</b>\n\n"
+                f"🌍 {country_name}\n"
+                f"💰 New Price: ₹{price}",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="set_price_menu")]])
+            )
+            del user_sessions[user_id]
+        except ValueError:
+            await message.reply_text("❌ Enter valid number")
 
-# Available Accounts with Refresh
+# Available Accounts
 @app.on_callback_query(filters.regex("^available_accounts$"))
 async def available_accounts_callback(client, callback_query):
+    await callback_query.answer()
     user_id = callback_query.from_user.id
     if not is_owner(user_id):
-        await callback_query.answer("Unauthorized!", show_alert=True)
+        await callback_query.answer("❌ Unauthorized!", show_alert=True)
         return
     
     accounts = db.get_available_accounts()
@@ -268,150 +297,229 @@ async def available_accounts_callback(client, callback_query):
     
     if not accounts:
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton(BUTTON_REFRESH, callback_data="available_accounts")],
-            [InlineKeyboardButton(BUTTON_BACK, callback_data="main_menu")]
+            [InlineKeyboardButton("🔄 Refresh", callback_data="available_accounts")],
+            [InlineKeyboardButton("⬅️ Back", callback_data="main_menu")]
         ])
-        await callback_query.edit_message_text(NO_ACCOUNTS_AVAILABLE, reply_markup=keyboard)
+        try:
+            await callback_query.edit_message_text(
+                "❌ No accounts available",
+                reply_markup=keyboard
+            )
+        except:
+            await callback_query.message.reply_text(
+                "❌ No accounts available",
+                reply_markup=keyboard
+            )
         return
     
-    text = AVAILABLE_ACCOUNTS_TITLE
+    text = "📊 <b>Available Accounts</b>\n\n"
     for stat in country_stats:
         country_name = COUNTRY_NAMES.get(stat["_id"], stat["_id"])
-        price = Config.PRICES.get(stat["_id"], Config.PRICES["OTHER"])
-        text += ACCOUNT_COUNTRY_STATS.format(
-            country=country_name,
-            count=stat["count"],
-            price=price
-        ) + "\n"
+        price = db.get_country_price(stat["_id"]) or Config.PRICES.get(stat["_id"], Config.PRICES["OTHER"])
+        text += f"📍 <b>{country_name}</b> - {stat['count']} accounts (₹{price})\n"
     
-    text += TOTAL_ACCOUNTS.format(total=len(accounts))
+    text += f"\n📈 <b>Total:</b> {len(accounts)} accounts"
     
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(BUTTON_REFRESH, callback_data="available_accounts")],
-        [InlineKeyboardButton(BUTTON_BACK, callback_data="main_menu")]
+        [InlineKeyboardButton("🔄 Refresh", callback_data="available_accounts")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="main_menu")]
     ])
     
-    await callback_query.edit_message_text(text, reply_markup=keyboard)
+    try:
+        await callback_query.edit_message_text(text, reply_markup=keyboard)
+    except:
+        await callback_query.message.reply_text(text, reply_markup=keyboard)
 
 # Sold Accounts
 @app.on_callback_query(filters.regex("^solded$"))
 async def solded_accounts_callback(client, callback_query):
+    await callback_query.answer()
     user_id = callback_query.from_user.id
     if not is_owner(user_id):
-        await callback_query.answer("Unauthorized!", show_alert=True)
+        await callback_query.answer("❌ Unauthorized!", show_alert=True)
         return
     
     today_stats = db.get_today_sales()
     
-    text = SOLDED_TITLE + SOLDED_TODAY_STATS.format(
-        sold_today=today_stats["total_sold"],
-        profit_today=today_stats["total_profit"]
+    text = (
+        "💰 <b>Sold Accounts</b>\n\n"
+        f"📅 <b>Today's Stats:</b>\n"
+        f"• Sold: {today_stats['total_sold']}\n"
+        f"• Profit: ₹{today_stats['total_profit']}\n\n"
+        f"<i>More features coming soon...</i>"
     )
     
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(SOLDED_BUTTONS["set_price"], callback_data="set_price_menu")],
-        [InlineKeyboardButton(SOLDED_BUTTONS["seven_days"], callback_data="seven_days")],
-        [InlineKeyboardButton(BUTTON_BACK, callback_data="main_menu")]
+        [InlineKeyboardButton("💵 Set Prices", callback_data="set_price_menu")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="main_menu")]
     ])
     
-    await callback_query.edit_message_text(text, reply_markup=keyboard)
+    try:
+        await callback_query.edit_message_text(text, reply_markup=keyboard)
+    except:
+        await callback_query.message.reply_text(text, reply_markup=keyboard)
 
 # Set Price Menu
 @app.on_callback_query(filters.regex("^set_price_menu$"))
 async def set_price_menu_callback(client, callback_query):
+    await callback_query.answer()
     user_id = callback_query.from_user.id
     if not is_owner(user_id):
-        await callback_query.answer("Unauthorized!", show_alert=True)
+        await callback_query.answer("❌ Unauthorized!", show_alert=True)
         return
     
-    price_list = "\n".join([f"• {COUNTRY_NAMES[country]}: ₹{price}" 
-                           for country, price in Config.PRICES.items()])
+    price_list = "\n".join([
+        f"• {COUNTRY_NAMES[country]}: ₹{db.get_country_price(country) or Config.PRICES.get(country, Config.PRICES['OTHER'])}" 
+        for country in ["US", "GB", "IN", "AU", "DE", "FR", "OTHER"]
+    ])
     
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🇺🇸 US", callback_data="set_price_US"),
-        InlineKeyboardButton("🇬🇧 GB", callback_data="set_price_GB")],
+         InlineKeyboardButton("🇬🇧 GB", callback_data="set_price_GB")],
         [InlineKeyboardButton("🇮🇳 IN", callback_data="set_price_IN"),
-        InlineKeyboardButton("🇦🇺 AU", callback_data="set_price_AU")],
+         InlineKeyboardButton("🇦🇺 AU", callback_data="set_price_AU")],
         [InlineKeyboardButton("🇩🇪 DE", callback_data="set_price_DE"),
-        InlineKeyboardButton("🇫🇷 FR", callback_data="set_price_FR")],
+         InlineKeyboardButton("🇫🇷 FR", callback_data="set_price_FR")],
         [InlineKeyboardButton("🌍 OTHER", callback_data="set_price_OTHER")],
-        [InlineKeyboardButton(BUTTON_BACK, callback_data="solded")]
+        [InlineKeyboardButton("⬅️ Back", callback_data="solded")]
     ])
     
-    await callback_query.edit_message_text(
-        SET_PRICE_MENU.format(price_list=price_list),
-        reply_markup=keyboard
-    )
+    try:
+        await callback_query.edit_message_text(
+            f"💵 <b>Set Prices (INR)</b>\n\n{price_list}\n\nClick country to set price:",
+            reply_markup=keyboard
+        )
+    except:
+        await callback_query.message.reply_text(
+            f"💵 <b>Set Prices (INR)</b>\n\n{price_list}\n\nClick country to set price:",
+            reply_markup=keyboard
+        )
 
-# Handle individual country price setting
+# Handle price setting callbacks
 @app.on_callback_query(filters.regex("^set_price_"))
 async def set_price_country_callback(client, callback_query):
+    await callback_query.answer()
     user_id = callback_query.from_user.id
     if not is_owner(user_id):
-        await callback_query.answer("Unauthorized!", show_alert=True)
+        await callback_query.answer("❌ Unauthorized!", show_alert=True)
         return
     
     country = callback_query.data.split("_")[2]
     user_sessions[user_id] = {"setting_price_for": country}
     
     country_name = COUNTRY_NAMES.get(country, country)
-    current_price = Config.PRICES.get(country, Config.PRICES["OTHER"])
+    current_price = db.get_country_price(country) or Config.PRICES.get(country, Config.PRICES["OTHER"])
     
-    await callback_query.edit_message_text(
-        f"💵 <b>Set Price for {country_name}</b>\n\n"
-        f"Current Price: ₹{current_price}\n\n"
-        f"Please send the new price in INR:",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(BUTTON_BACK, callback_data="set_price_menu")]])
-    )
+    try:
+        await callback_query.edit_message_text(
+            f"💵 <b>Set Price for {country_name}</b>\n\n"
+            f"Current: ₹{current_price}\n\n"
+            f"Send new price (numbers only):",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="set_price_menu")]])
+        )
+    except:
+        await callback_query.message.reply_text(
+            f"💵 <b>Set Price for {country_name}</b>\n\n"
+            f"Current: ₹{current_price}\n\n"
+            f"Send new price (numbers only):",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="set_price_menu")]])
+        )
 
 # Users Management
 @app.on_callback_query(filters.regex("^users$"))
 async def users_callback(client, callback_query):
+    await callback_query.answer()
     user_id = callback_query.from_user.id
     if not is_owner(user_id):
-        await callback_query.answer("Unauthorized!", show_alert=True)
+        await callback_query.answer("❌ Unauthorized!", show_alert=True)
         return
     
     stats = db.get_user_stats()
     
-    text = USERS_TITLE + USERS_STATS.format(
-        total_users=stats["total_users"],
-        active_today=stats["active_today"],
-        bought_today=stats["bought_today"]
+    text = (
+        "👥 <b>Users Management</b>\n\n"
+        f"📊 <b>Statistics:</b>\n"
+        f"• Total Users: {stats['total_users']}\n"
+        f"• Active Today: {stats['active_today']}\n"
+        f"• Bought Today: {stats['bought_today']}\n\n"
+        f"<i>More features coming soon...</i>"
     )
     
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📢 Broadcast", callback_data="broadcast")],
-        [InlineKeyboardButton(BUTTON_REFRESH, callback_data="users")],
-        [InlineKeyboardButton(BUTTON_BACK, callback_data="main_menu")]
+        [InlineKeyboardButton("🔄 Refresh", callback_data="users")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="main_menu")]
     ])
     
-    await callback_query.edit_message_text(text, reply_markup=keyboard)
+    try:
+        await callback_query.edit_message_text(text, reply_markup=keyboard)
+    except:
+        await callback_query.message.reply_text(text, reply_markup=keyboard)
 
-# Get account command for users
+# Get account command - OTP/2FA flow for users
 @app.on_message(filters.command("get"))
 async def get_account(client, message):
     if len(message.command) < 2:
-        await message.reply_text(GET_ACCOUNT_USAGE)
+        await message.reply_text("❌ Usage: /get CODE")
         return
     
     code = message.command[1]
     account = db.get_account_by_code(code)
     
     if not account:
-        await message.reply_text(INVALID_CODE)
+        await message.reply_text("❌ Invalid code or account not available")
         return
+    
+    # Store account session for OTP/2FA flow
+    account_sessions[message.from_user.id] = {
+        "account_code": code,
+        "step": "awaiting_otp",
+        "phone": account["phone"]
+    }
     
     price = account.get("price", Config.PRICES.get(account["country"], Config.PRICES["OTHER"]))
     
     await message.reply_text(
-        ACCOUNT_DETAILS.format(
-            country=account["country"],
-            phone=account["phone"],
-            price=price
-        )
+        f"📱 <b>Account Details</b>\n\n"
+        f"🌍 <b>Country:</b> {account['country']}\n"
+        f"📞 <b>Phone:</b> {account['phone']}\n"
+        f"💰 <b>Price:</b> ₹{price}\n\n"
+        f"<i>Please provide OTP when received...</i>"
     )
 
+# Handle OTP/2FA for account access
+@app.on_message(filters.private & filters.text & ~filters.command(["start", "get"]))
+async def handle_otp_2fa(client, message):
+    user_id = message.from_user.id
+    
+    # Handle OTP/2FA for account access
+    if user_id in account_sessions:
+        session = account_sessions[user_id]
+        
+        if session["step"] == "awaiting_otp":
+            # Simulate OTP verification (you can integrate real OTP handling here)
+            otp = message.text.strip()
+            if len(otp) == 5 and otp.isdigit():
+                session["step"] = "completed"
+                
+                # Mark account as sold
+                account = db.get_account_by_code(session["account_code"])
+                if account:
+                    price = account.get("price", Config.PRICES.get(account["country"], Config.PRICES["OTHER"]))
+                    db.mark_account_sold(session["account_code"], user_id, price)
+                    
+                    await message.reply_text(
+                        f"✅ <b>Transaction Complete!</b>\n\n"
+                        f"📱 <b>Account:</b> {session['phone']}\n"
+                        f"💰 <b>Price:</b> ₹{price}\n\n"
+                        f"Thank you for your purchase! 🎉"
+                    )
+                else:
+                    await message.reply_text("❌ Account not found")
+                
+                del account_sessions[user_id]
+            else:
+                await message.reply_text("❌ Invalid OTP. Enter 5-digit code:")
+
 if __name__ == "__main__":
-    print("🤖 Bot started with real Telethon login...")
+    print("🤖 Bot started with proper error handling...")
     app.run()
